@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Fast and easy wrapper around LLMs."
 authors = ["Clemens Kriechbaumer <clemens.kriechbaumer@gmail.com>"]
 readme = "README.md"
+license = "Apache-2.0"
+homepage = "https://github.com/clemens33/fastllm"
 packages = [{ include = "fastllm" }]
 
 [tool.poetry.dependencies]

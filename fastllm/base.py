@@ -34,6 +34,14 @@ class Role(Enum):
     FUNCTION = "function"
 
 
+class Style(Enum):
+    """Represents the completion style. Corresponds to the temperature parameter."""
+
+    PRECISE = 0.0
+    BALANCED = 1.0
+    CREATIVE = 2.0
+
+
 @dataclass
 class Message:
     """Represents a message when interacting with a chat model."""
@@ -337,18 +345,28 @@ class Model:
 class Agent:
     """Represents an agent working with a model and a playbook."""
 
-    playbook: tuple[Conversation | Message | Prompt | Agent | str]
+    playbook: list[Conversation | Message | Prompt | Agent | str]
     model: Model
 
     def __init__(
-        self, *args: Conversation | Message | Prompt | Agent | str, model: Model
+        self,
+        *args: Conversation | Message | Prompt | Agent | str,
+        model: Model = Model(),
     ):
         """Initializes the playbook."""
 
-        self.playbook = args
+        self.playbook = []
+        for arg in args:
+            if isinstance(arg, str):
+                self.playbook.append(Prompt(arg))
+            elif isinstance(arg, Conversation | Message | Prompt | Agent):
+                self.playbook.append(arg)
+            else:
+                raise TypeError(f"Cannot add {type(arg)} to Agent.")
+
         self.model = model
 
-    def __call__(self, **inputs) -> str:
+    def __call__(self, **inputs: Any) -> str:
         """Returns the final response of the agent."""
 
         final_response = ""
@@ -357,7 +375,7 @@ class Agent:
 
         return final_response
 
-    def run(self, **inputs) -> Generator[str, None, None]:
+    def run(self, **inputs: Any) -> Generator[str, None, None]:
         """Runs through the playbook and yields intermediate responses."""
 
         steps = []

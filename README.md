@@ -15,24 +15,38 @@ export OPENAI_API_KEY=...
 ### Agents
 
 ```python
+from fastllm import Agent
+
+fine_cities = Agent("List {{ n }} cities comma separated in {{ country }}.")
+
+cities = fine_cities(n=3, country="Austria").split(",")
+
+print(cities)
+```
+
+```bash
+['Vienna', 'Salzburg', 'Graz']
+```
+
+```python
 from fastllm import Agent, Message, Model, Prompt, Role
 
-name_finder = Agent(
+s = ";"
+
+creative_name_finder = Agent(
     Message("You are an expert name finder.", Role.SYSTEM),
-    Prompt("Find {{ n }} short names."),
-    Prompt("Print names comma separated, nothing else!"),
-    model=Model(),
+    Prompt("Find {{ n }} names.", temperature=2.0),
+    Prompt("Print names {{ s }} separated, nothing else!"),
+    model=Model("gpt-4"),
 )
 
-names = name_finder(n=3).split(",")
+names = creative_name_finder(n=3, s=s).split(s)
 
 print(names)
 ```
 
-Output:
-
 ```bash
-['John', 'Bob', 'Alice']
+['Ethan Gallagher, Samantha Cheng, Max Thompson']
 ```
 
 ## Development

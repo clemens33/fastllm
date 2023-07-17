@@ -1,6 +1,7 @@
 """Tests for the Message class."""
 
 import logging
+from math import log
 
 import pytest
 
@@ -283,6 +284,20 @@ class TestModel:
 
 class TestAgent:
     """Tests Agent class."""
+
+    @pytest.mark.openai
+    def test_simple_agent_from_str(self):
+        """Tests a simple agent."""
+
+        find_names = Agent(
+            "Find {{ n }} short names. Return them comma separated. Nothing else!"
+        )
+
+        names = find_names(n=3).split(",")
+
+        logger.info(names)
+
+        assert len(names) == 3
 
     @pytest.mark.openai
     def test_simple_agent(self):
