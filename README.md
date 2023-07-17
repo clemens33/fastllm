@@ -17,9 +17,9 @@ export OPENAI_API_KEY=...
 ```python
 from fastllm import Agent
 
-fine_cities = Agent("List {{ n }} cities comma separated in {{ country }}.")
+find_cities = Agent("List {{ n }} cities comma separated in {{ country }}.")
 
-cities = fine_cities(n=3, country="Austria").split(",")
+cities = find_cities(n=3, country="Austria").split(",")
 
 print(cities)
 ```
