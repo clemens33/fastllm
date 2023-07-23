@@ -1,28 +1,38 @@
-"""Base classes and functions."""
+"""fastllm base classes and functions."""
 
 
 from __future__ import annotations
 
+import inspect
+import json
 import logging
 from dataclasses import InitVar, dataclass, field
 from enum import Enum
-from typing import Any, Callable, Generator
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    Generator,
+    Literal,
+    ParamSpec,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+    overload,
+)
 
 import backoff
 import openai
 from jinja2 import Template
-from openai.error import RateLimitError
-
-from fastllm.utils import Functions
+from jsonschema import ValidationError, validate
+from openai.error import RateLimitError, ServiceUnavailableError
 
 logger = logging.getLogger(__name__)
 
 
-class ModelType(Enum):
-    """Type of model."""
-
-    CHAT = "chat"
-    COMPLETION = "completion"
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class Role(Enum):
@@ -34,12 +44,229 @@ class Role(Enum):
     FUNCTION = "function"
 
 
-class Style(Enum):
-    """Represents the completion style. Corresponds to the temperature parameter."""
+@dataclass
+class Function:
+    """Represents a function that can be called from a model."""
 
-    PRECISE = 0.0
-    BALANCED = 1.0
-    CREATIVE = 2.0
+    TYPE_MAP = {
+        int: "integer",
+        str: "string",
+        bool: "boolean",
+        float: "number",
+    }
+
+    function: Callable[..., Any] = field(init=False)
+    name: str = field(init=False)
+    description: str = field(init=False)
+    parameters: dict = field(init=False)
+
+    def __init__(
+        self,
+        function: Callable[..., Any] | Function,
+        name: str | None = None,
+        description: str | None = None,
+    ):
+        """Initializes the function."""
+
+        if isinstance(function, Function):
+            self.function = function.function
+            self.name = function.name
+            self.description = function.description
+            self.parameters = function.parameters
+        else:
+            self.function = function
+            self.name = name or function.__name__
+            self.description = description or function.__doc__ or function.__name__
+            self.parameters = self._parameters(function)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Calls the function."""
+
+        return self.function(*args, **kwargs)
+
+    def call(self, arguments_json_string: str) -> Any:
+        """Calls function from arguments json string.
+
+        Is validated against its parameter schema.
+
+        """
+
+        arguments = None
+
+        try:
+            arguments = json.loads(arguments_json_string)
+
+            validate(instance=arguments, schema=self.parameters)
+        except json.JSONDecodeError as e:
+            logger.debug(f"Could not decode arguments {arguments_json_string}: {e}")
+
+            raise e
+        except ValidationError as e:
+            logger.debug(
+                f"Arguments {arguments} do not match schema {self.parameters}: {e}"
+            )
+
+            raise e
+
+        return self(**arguments)
+
+    @property
+    def schema(self) -> dict:
+        """Returns a schema description of the function."""
+
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": self.parameters,
+        }
+
+    @classmethod
+    def _properties(cls, function: Callable[..., Any]) -> dict:
+        """Returns the parameters and types of a function."""
+
+        params = inspect.signature(function).parameters
+        type_hints = get_type_hints(function)
+
+        properties = {param: {} for param in params}
+        for name, type_hint in type_hints.items():
+            array = False
+            literals = None
+
+            if get_origin(type_hint) is Literal:
+                literals = get_args(type_hint)
+                literal_types = {type(literal) for literal in literals}
+
+                if len(literal_types) != 1:
+                    raise TypeError(
+                        f"Literal type hints must be of the same type. \
+Got {literal_types}."
+                    )
+
+                type_hint = literal_types.pop()
+            elif get_origin(type_hint) is list:
+                list_types = get_args(type_hint)
+
+                if len(list_types) != 1:
+                    raise TypeError("Optional type hints not supported in list.")
+
+                type_hint = list_types[0]
+                array = True
+
+            if type_hint and type_hint not in cls.TYPE_MAP:
+                raise TypeError(
+                    f"Type {type_hint} of argument {name} not supported. "
+                    f"Supported type hints are {list(cls.TYPE_MAP.keys())}."
+                )
+
+            if array:
+                properties[name]["type"] = "array"
+                properties[name]["items"] = {"type": cls.TYPE_MAP[type_hint]}
+            else:
+                properties[name]["type"] = cls.TYPE_MAP[type_hint]
+
+                if literals:
+                    properties[name]["enum"] = list(literals)
+
+        return properties
+
+    @classmethod
+    def _parameters(cls, fn: Callable[..., Any]) -> dict:
+        """Returns a description of the functions parameters."""
+
+        return {
+            "type": "object",
+            "properties": cls._properties(fn),
+            "required": cls._required(fn),
+        }
+
+    @classmethod
+    def _required(cls, func):
+        """Returns the required parameters of a function."""
+
+        return [
+            name
+            for name, parameter in inspect.signature(func).parameters.items()
+            if parameter.default == inspect.Parameter.empty
+        ]
+
+
+@dataclass(kw_only=True)
+class Functions:
+    """Mixin for registering and handling functions."""
+
+    functions: InitVar[list[Callable[..., Any]] | None] = None
+    _functions: list[Function] = field(init=False, default_factory=list)
+
+    def __post_init__(
+        self,
+        functions: list[Callable[..., Any]] | None = None,
+    ):
+        """Initializes the functions."""
+
+        self._functions = [Function(fn) for fn in functions or []]
+
+    @overload
+    def function(self, fn: Callable[P, R]) -> Callable[P, R]:
+        ...
+
+    @overload
+    def function(
+        self,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]:
+        ...
+
+    def function(
+        self,
+        fn: Callable[P, R] | None = None,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> Callable[[Callable[P, R]], Callable[P, R]] | Callable[P, R]:
+        """Decorator for registering a function."""
+
+        def wrapper(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+            return fn(*args, **kwargs)
+
+        if fn is not None:
+            if not callable(fn):
+                raise TypeError("Only supports optional keyword arguments.")
+
+            self._functions.append(Function(fn, name, description))
+
+            return wraps(fn)(partial(wrapper, fn))
+
+        def decorator(fn: Callable[P, R]) -> Callable[P, R]:
+            self._functions.append(Function(fn, name, description))
+
+            return wraps(fn)(partial(wrapper, fn))
+
+        return decorator
+
+    def function_call(
+        self,
+        name: str,
+        arguments_json_string: str | None = None,
+        functions: list[Function] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Calls the function with the given name.
+
+        If functions are passed, they are used instead of the instance functions.
+        """
+
+        functions = functions or self._functions
+
+        for function in functions:
+            if function.name == name:
+                if arguments_json_string:
+                    return function.call(arguments_json_string)
+                else:
+                    return function(**kwargs)
+
+        raise ValueError(f"Function {name} not available. ")
 
 
 @dataclass
@@ -48,9 +275,9 @@ class Message:
 
     seed: InitVar[Message | dict | str]
     role: Role = Role.USER
-    name: str | None = field(default=None)
-    function_call: dict[str, str] | None = field(default=None)
-    content: str = field(init=False)
+    name: str | None = None
+    function_call: dict[str, str] | None = None
+    content: str = field(init=False, default="")
 
     def __post_init__(self, seed: Message | dict | str):
         """Initializes the message content."""
@@ -155,7 +382,7 @@ class Message:
 class Conversation:
     """Represents a ordered list of messages."""
 
-    messages: list[Message]
+    messages: list[Message] = field(init=False, default_factory=list)
 
     def __init__(self, *args: Conversation | Message | str):
         """Initializes the conversation."""
@@ -198,6 +425,20 @@ class Conversation:
             else:
                 raise TypeError(f"Cannot add {type(arg)} to Conversation.")
 
+    def count(
+        self, value: str, recent_n: int | None = None, role: Role = Role.ASSISTANT
+    ) -> int:
+        """Counts the appearance of value in the last n messages of given role."""
+
+        messages = [message for message in self.messages if message.role == role]
+        messages = (
+            messages[-recent_n:] if recent_n and recent_n < len(messages) else messages
+        )
+
+        matches = [value in repr(m) for m in messages if m.role == role]
+
+        return sum(matches)
+
     def to_list(self) -> list[dict]:
         """Returns the messages as a list of dicts."""
 
@@ -205,12 +446,11 @@ class Conversation:
 
 
 @dataclass
-class Prompt:
+class Prompt(Functions):
     """Represents a prompt."""
 
-    template: Template
-    role: Role = Role.USER
-    functions: list[Callable[..., Any]] | None = None
+    template: Template = field(init=False)
+    role: Role = field(init=False, default=Role.USER)
     model_params: dict[str, Any] = field(default_factory=dict)
 
     def __init__(
@@ -222,9 +462,10 @@ class Prompt:
     ):
         """Initializes the prompt."""
 
+        super().__init__(functions=functions)
+
         self.template = Template(template)
         self.role = role
-        self.functions = functions
         self.model_params = model_params
 
     def __call__(self, **kwargs) -> Message:
@@ -234,21 +475,25 @@ class Prompt:
 
 
 @dataclass
-class Model:
+class Model(Functions):
     """Represents a model."""
 
     seed: InitVar[Conversation | Message | str | None] = None
-    name: str = "gpt-3.5-turbo"
-    nr_tokens_max: int | None = None
-    token_in_price: float | None = None
-    token_out_price: float | None = None
-    model_type: ModelType = ModelType.CHAT
-    functions: list[Callable[..., Any]] | None = None
+    name: str = "gpt-3.5-turbo-0613"
     stream_callback: Callable[[str], Any] | None = None
-    conversation: Conversation = field(init=False)
+    conversation: Conversation = field(init=False, default_factory=Conversation)
 
-    def __post_init__(self, seed: Conversation | Message | str | None):
-        """Initializes the model. Optionally pass a seed as conversation, message or string."""
+    def __post_init__(
+        self,
+        available_functions: list[Callable[..., Any]] | None = None,
+        seed: Conversation | Message | str | None = None,
+    ):
+        """Initializes the model.
+
+        Optionally pass a seed as conversation, message or string.
+        """
+
+        super().__post_init__(available_functions)
 
         if seed is None:
             self.conversation = Conversation()
@@ -264,23 +509,23 @@ class Model:
     def __call__(
         self,
         *args: Conversation | Message | str,
-        functions: list[Callable[..., Any]] | None = None,
+        functions: list[Callable[..., Any]] | list[Function] | None = None,
         stream_callback: Callable[[str], Any] | None = None,
         **kwargs,
     ) -> str:
         """Returns the response of the model."""
 
         self.update(*args)
-        functions = functions or self.functions
 
-        if functions:
-            kwargs["functions"] = [
-                Functions.describe(function) for function in functions
-            ]
+        _functions = [Function(fn) for fn in functions or []] + self._functions
+
+        if _functions:
+            kwargs["functions"] = [function.schema for function in _functions]
+            # kwargs["function_call"] = "auto"
 
         stream_callback = stream_callback or self.stream_callback
 
-        if stream_callback is not None:
+        if stream_callback:
             response = Message("", Role.ASSISTANT)
 
             for chunk in self.completion(stream=True, **kwargs):
@@ -292,25 +537,39 @@ class Model:
             response = next(self.completion(**kwargs))
 
         message = Message(response)
-
-        # Call function if message contains a function call
-        if functions and message.function_call:
+        if message.function_call:
             self.update(message)
 
-            function_output = Functions.call(functions, message.function_call)
+            function_output = self.function_call(
+                message.function_call["name"],
+                message.function_call["arguments"],
+                functions=_functions,
+            )
 
-            # Call self with function output - TODO check that we leave a potential infinite loop
+            function_message = Message(
+                str(function_output), Role.FUNCTION, message.function_call["name"]
+            )
+
+            kwargs.pop("functions", None)
+
+            # TODO might result in an infinite loop - fix this!
             self(
-                Message(
-                    str(function_output), Role.FUNCTION, message.function_call["name"]
-                )
+                function_message,
+                functions=functions,
+                stream_callback=stream_callback,
+                **kwargs,
             )
         else:
             self.update(Message(response))
 
         return self.conversation[-1]()
 
-    @backoff.on_exception(backoff.expo, RateLimitError, max_time=60, logger=logger)
+    @backoff.on_exception(
+        backoff.expo,
+        [RateLimitError, ServiceUnavailableError],
+        max_time=60,
+        logger=logger,
+    )
     def completion(self, stream: bool = False, **kwargs) -> Generator[dict, None, None]:
         """Calls the model, retries on RateLimitError."""
 
@@ -330,6 +589,23 @@ class Model:
         else:
             yield response  # type: ignore
 
+    def function_call(
+        self,
+        name: str,
+        arguments: str | None = None,
+        functions: list[Function] | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Calls the function with the given name."""
+
+        result = None
+        try:
+            result = super().function_call(name, arguments, functions, **kwargs)
+        except (ValidationError, json.JSONDecodeError) as e:
+            result = e
+
+        return result
+
     def update(self, *args: Conversation | Message | str):
         """Updates the models conversation."""
 
@@ -342,18 +618,21 @@ class Model:
 
 
 @dataclass
-class Agent:
+class Agent(Functions):
     """Represents an agent working with a model and a playbook."""
 
-    playbook: list[Conversation | Message | Prompt | Agent | str]
-    model: Model
+    playbook: list[Conversation | Message | Prompt | Agent | str] = field(init=False)
+    model: Model = field(default_factory=Model)
 
     def __init__(
         self,
         *args: Conversation | Message | Prompt | Agent | str,
         model: Model = Model(),
+        functions: list[Callable[..., Any]] | None = None,
     ):
         """Initializes the playbook."""
+
+        super().__init__(functions=functions)
 
         self.playbook = []
         for arg in args:
@@ -386,7 +665,7 @@ class Agent:
                 yield self.model(
                     *steps,
                     prompt(**inputs),
-                    functions=prompt.functions,
+                    functions=prompt._functions + self._functions,
                     **prompt.model_params,
                 )
 
@@ -394,69 +673,6 @@ class Agent:
             elif isinstance(step, Agent):
                 agent = step
 
-                yield self.model(*steps, agent(**inputs))
+                yield self.model(*steps, agent(**inputs), functions=self._functions)
             else:
                 steps.append(step)
-
-
-class Models:
-    """Represents the available openai models."""
-
-    available_models = {
-        "gpt-4": {
-            "nr_tokens_max": 8192,
-            "token_in_price": 0.03,
-            "token_out_price": 0.06,
-            "model_type": ModelType.CHAT,
-            "functions": False,
-        },
-        "gpt-4-0613": {
-            "nr_tokens_max": 8192,
-            "token_in_price": 0.03,
-            "token_out_price": 0.06,
-            "model_type": ModelType.CHAT,
-            "functions": True,
-        },
-        "gpt-3.5-turbo": {
-            "nr_tokens_max": 4096,
-            "token_in_price": 0.0015,
-            "token_out_price": 0.002,
-            "model_type": ModelType.CHAT,
-            "functions": False,
-        },
-        "gpt-3.5-turbo-0613": {
-            "nr_tokens_max": 4096,
-            "token_in_price": 0.0015,
-            "token_out_price": 0.002,
-            "model_type": ModelType.CHAT,
-            "functions": True,
-        },
-        "gpt-3.5-turbo-16k": {
-            "nr_tokens_max": 16384,
-            "token_in_price": 0.003,
-            "token_out_price": 0.004,
-            "model_type": ModelType.CHAT,
-            "functions": False,
-        },
-        "gpt-3.5-turbo-16k-0613": {
-            "nr_tokens_max": 16384,
-            "token_in_price": 0.003,
-            "token_out_price": 0.004,
-            "model_type": ModelType.CHAT,
-            "functions": True,
-        },
-    }
-
-    @classmethod
-    def create(
-        cls,
-        seed: Conversation | Message | str | None = None,
-        name: str = "gpt-3.5-turbo",
-    ) -> Model:
-        """Returns a new instance of the model with the given name."""
-
-        try:
-            model_info = cls.available_models[name]
-            return Model(seed, name=name, **model_info)
-        except KeyError:
-            raise ValueError(f"Model {name} not found.")

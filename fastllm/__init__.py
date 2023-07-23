@@ -1,4 +1,4 @@
-"""FastLLM package."""
+"""fastllm package."""
 
 from .base import Agent, Message, Model, Prompt, Role
 

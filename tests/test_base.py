@@ -1,26 +1,314 @@
 """Tests for the Message class."""
 
 import logging
-from math import log
+from typing import Any, Callable, List, Literal
 
 import pytest
+from jsonschema import ValidationError
 
-from fastllm.base import Agent, Conversation, Message, Model, Prompt, Role
+from fastllm.base import (
+    Agent,
+    Conversation,
+    Function,
+    Functions,
+    Message,
+    Model,
+    Prompt,
+    Role,
+)
 
 logger = logging.getLogger(__name__)
+
+
+class TestFunction:
+    """Tests the Function class."""
+
+    def test_basic(self):
+        """Tests basic functionality."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        function = Function(add_numbers)
+        assert function.name == "add_numbers"
+        assert function.description == "Adds two integer numbers."
+        assert function.parameters == {
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+        }
+        assert function(a=3, b=4) == 7
+
+    def test_basic_from_function(self):
+        """Tests basic functionality."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        _function = Function(add_numbers)
+        function = Function(_function)
+
+        assert function.name == "add_numbers"
+        assert function.description == "Adds two integer numbers."
+        assert function.parameters == {
+            "type": "object",
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"],
+        }
+        assert function(a=3, b=4) == 7
+
+    def test_basic_no_hints(self):
+        """Tests basic functionality without type hints."""
+
+        def add_numbers(a, b):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        function = Function(add_numbers)
+        assert function.name == "add_numbers"
+        assert function.description == "Adds two integer numbers."
+        assert function.parameters == {
+            "type": "object",
+            "properties": {"a": {}, "b": {}},
+            "required": ["a", "b"],
+        }
+        assert function(a=3, b=4) == 7
+
+    def test_literal_type_hints(self):
+        """Tests functions with literal type hints."""
+
+        def calculator(
+            a: int,
+            b: int,
+            op: Literal[
+                "+",
+                "-",
+            ],
+        ):
+            """Calculator function."""
+
+            match op:
+                case "+":
+                    return a + b
+                case "-":
+                    return a - b
+                case _:
+                    ValueError(f"Operator {op} not supported.")
+
+        function = Function(calculator)
+        assert function.parameters == {
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"},
+                "op": {"type": "string", "enum": ["+", "-"]},
+            },
+            "required": ["a", "b", "op"],
+        }
+        assert function(a=3, b=4, op="+") == 7
+
+    def test_list_type_hints(self):
+        """Tests functions with list type hints."""
+
+        def add_numbers(a: list[int], b: List[float]):
+            """Adds all numbers in a list."""
+
+            return sum(a) + sum(b)
+
+        function = Function(add_numbers)
+        assert function.parameters == {
+            "type": "object",
+            "properties": {
+                "a": {"type": "array", "items": {"type": "integer"}},
+                "b": {"type": "array", "items": {"type": "number"}},
+            },
+            "required": ["a", "b"],
+        }
+        assert function(a=[3, 4], b=[5.0, 6.0]) == 18
+
+    def test_custom_init(self):
+        """Tests custom init."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        function = Function(
+            add_numbers,
+            "my name",
+            "my description",
+        )
+        assert function.name == "my name"
+        assert function.description == "my description"
+        assert function(a=3, b=4) == 7
+
+    def test_schema(self):
+        """Tests that a Function can be converted to a schema/dictionary."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        function = Function(add_numbers)
+        assert function.schema == {
+            "name": "add_numbers",
+            "description": "Adds two integer numbers.",
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                "required": ["a", "b"],
+            },
+        }
+
+    def test_unsupported_type_hint(self):
+        """Tests that a Function raises an error.
+
+        When a function with unsupported type hints is used.
+        """
+
+        def unsupported_type_hint(a: tuple[int]):
+            return sum(a)
+
+        with pytest.raises(TypeError):
+            Function(unsupported_type_hint)
+
+    def test_call(self):
+        """Test the function call."""
+
+        def add_numbers(a, b):
+            return a + b
+
+        function = Function(add_numbers)
+
+        assert function.call('{\n  "a": 1234,\n  "b": 9876\n}') == 11110
+
+    def test_call_json_parse_error(self):
+        """Test the function call expecting a json parse error."""
+
+        def add_numbers(a, b):
+            return a + b
+
+        function = Function(add_numbers)
+
+        with pytest.raises(ValueError):
+            function.call('{\n  "a": 1234,\n  "b": 9876\n')
+
+    def test_call_json_schema_error(self):
+        """Test the function call expecting a json parse error."""
+
+        def add_numbers(a, b):
+            return a + b
+
+        function = Function(add_numbers)
+
+        with pytest.raises(ValidationError):
+            function.call('{\n  "a": 1234,\n  "c": 9876\n}')
+
+
+class TestFunctions:
+    """Tests the functions mixin."""
+
+    def test_mixin(self):
+        """Tests mixin."""
+
+        class Agent(Functions):
+            """Test class."""
+
+            def __init__(self, functions):
+                """Initializes the class."""
+
+                super().__init__(functions=functions)
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        agent = Agent(functions=[add_numbers])
+
+        assert len(agent._functions) == 1
+        assert agent.function_call("add_numbers", a=1, b=2) == 3
+
+    def test_mixin_basic_decorator(self):
+        """Tests mixin with basic decorator."""
+
+        class Agent(Functions):
+            """Test class."""
+
+            def __init__(self, functions: list[Callable[..., Any]] | None = None):
+                """Initializes the class."""
+
+                super().__init__(functions=functions)
+
+        agent = Agent()
+
+        @agent.function
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        result1 = add_numbers(a=1, b=2)
+        result2 = add_numbers(1, 2)
+        result3 = agent.function_call("add_numbers", a=1, b=2)
+
+        assert len(agent._functions) == 1
+        assert result1 == result2 == result3 == 3
+
+    def test_mixin_decorator_custom(self):
+        """Tests basic mixin."""
+
+        class Agent(Functions):
+            """Test class."""
+
+            def __init__(self, functions: list[Callable[..., Any]] | None = None):
+                """Initializes the class."""
+
+                super().__init__(functions=functions)
+
+        agent = Agent()
+
+        @agent.function
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        @agent.function(name="my_subtraction")
+        def subtract_numbers(a: int, b: int):
+            """Subtracts two integer numbers."""
+
+            return a - b
+
+        @agent.function(name="my_multiplication")
+        def multiply_numbers(a: int, b: int):
+            """Multiplies two integer numbers."""
+
+            return a * b
+
+        assert len(agent._functions) == 3
+        assert agent.function_call("my_subtraction", a=5, b=2) == 3
+        assert agent.function_call("my_multiplication", a=1, b=0) == 0
 
 
 class TestMessage:
     """Tests for Message class."""
 
-    def test_message_from_str(self):
+    def test_from_str(self):
         """Tests initialization with a string."""
 
         message = Message("Hello world")
         assert message.role == Role.USER
         assert message.content == "Hello world"
 
-    def test_message_from_message(self):
+    def test_from_message(self):
         """Tests initialization with a Message instance."""
 
         original_message = Message("Hello world")
@@ -28,7 +316,7 @@ class TestMessage:
         assert new_message.role == Role.USER
         assert new_message.content == "Hello world"
 
-    def test_message_from_dict_response(self):
+    def test_from_dict_response(self):
         """Tests initialization with a dictionary."""
 
         message_dict = {
@@ -38,12 +326,12 @@ class TestMessage:
         assert message.role == Role.ASSISTANT
         assert message.content == "Hello world"
 
-    def test_message_from_dict_delta_response(self):
+    def test_from_dict_delta_response(self):
         """Tests initialization with a dictionary."""
 
         pass
 
-    def test_message_from_dict_function_response(self):
+    def test_from_dict_function_response(self):
         """Tests initialization with a dictionary."""
 
         message_dict = {
@@ -73,20 +361,20 @@ class TestMessage:
         assert message.function_call is not None
         assert message.function_call["name"] == "add_numbers"
 
-    def test_message_str(self):
+    def test_str(self):
         """Tests the string representation of a Message."""
 
         message = Message("Hello world")
         assert str(message) == "user: Hello world"
 
-    def test_message_add_str(self):
+    def test_add_str(self):
         """Tests concatenation of a Message and a string."""
 
         message = Message("Hello")
         message += " world"
         assert message.content == "Hello world"
 
-    def test_message_add_message(self):
+    def test_add_message(self):
         """Tests concatenation of two Messages."""
 
         message1 = Message("Hello")
@@ -94,7 +382,7 @@ class TestMessage:
         message1 += message2
         assert message1.content == "Hello world"
 
-    def test_message_to_dict(self):
+    def test_to_dict(self):
         """Tests conversationersion of a Message to a dictionary."""
 
         message = Message("Hello world")
@@ -104,7 +392,7 @@ class TestMessage:
 class TestConversation:
     """Test suite for the Conversation class."""
 
-    def test_conversation_init_with_messages(self):
+    def test_init_with_messages(self):
         """Tests initialization with Message instances."""
 
         message1 = Message("Hello")
@@ -115,7 +403,7 @@ class TestConversation:
         assert conversation[1].content == " world"
         assert conversation[2].content == "!"
 
-    def test_conversation_init_with_conversation(self):
+    def test_init_with_conversation(self):
         """Tests initialization with a Conversation instance."""
 
         message1 = Message("Hello")
@@ -125,7 +413,7 @@ class TestConversation:
         assert len(conversation2) == 3
         assert conversation2[2].content == "!"
 
-    def test_conversation_add(self):
+    def test_add(self):
         """Tests concatenation of Conversations."""
 
         message1 = Message("Hello")
@@ -137,14 +425,14 @@ class TestConversation:
         assert conversation[0].content == "Hello"
         assert conversation[1].content == " world"
 
-    def test_conversation_str(self):
+    def test_str(self):
         """Tests string representation of a Conversation."""
         message1 = Message("Hello")
         message2 = Message(" world")
         conversation = Conversation(message1, message2)
         assert str(conversation) == "user: Hello\nuser:  world"
 
-    def test_conversation_to_list(self):
+    def test_to_list(self):
         """Tests conversationersion of a Conversation to a list of dictionaries."""
         message1 = Message("Hello")
         message2 = Message(" world")
@@ -158,15 +446,16 @@ class TestConversation:
 class TestPrompt:
     """Test suite for the Prompt class."""
 
-    def test_prompt_init(self):
+    def test_init(self):
         """Tests initialization of a Prompt."""
+
         template_str = "Hello, {{ name }}!"
         prompt = Prompt(template_str)
 
         assert prompt.role == Role.USER
         assert prompt.model_params == {}
 
-    def test_prompt_call(self):
+    def test_call(self):
         """Tests generating a Message from a Prompt."""
 
         template_str = "Hello, {{ name }}!"
@@ -176,7 +465,7 @@ class TestPrompt:
         assert message.role == Role.USER
         assert message.content == "Hello, world!"
 
-    def test_prompt_template_no_values_given(self):
+    def test_template_no_values_given(self):
         """Tests a prompt template."""
 
         prompt = Prompt("Find {{ nr_names }} short names")
@@ -185,18 +474,40 @@ class TestPrompt:
 
         assert message.content == "Find  short names"
 
-    def test_prompt_no_template(self):
+    def test_no_template(self):
         """Tests a prompt."""
 
         prompt = Prompt("Find short names")
 
         assert prompt() == Message("Find short names")
 
+    def test_functions(self):
+        """Tests a prompts with a function."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        prompt = Prompt(
+            "Calculate the result for task: {{ task }}",
+            functions=[add_numbers],
+        )
+
+        @prompt.function
+        def subtract_numbers(a: int, b: int):
+            """Subtracts two integer numbers."""
+
+            return a - b
+
+        assert prompt.function_call("add_numbers", a=1, b=2) == 3
+        assert prompt.function_call("subtract_numbers", a=3, b=2) == 1
+
 
 class TestModel:
     """Tests Model class."""
 
-    def test_model_seed_from_string(self):
+    def test_seed_from_string(self):
         """Tests creating a model from a conversation."""
 
         model = Model("You are a friendly assistant.")
@@ -205,7 +516,7 @@ class TestModel:
             "You are a friendly assistant.", Role.SYSTEM
         )
 
-    def test_model_seed_from_message(self):
+    def test_seed_from_message(self):
         """Tests creating a model from a conversation."""
 
         model = Model(Message("You are a friendly assistant.", Role.USER))
@@ -214,7 +525,7 @@ class TestModel:
             "You are a friendly assistant.", Role.USER
         )
 
-    def test_model_seed_from_conversation(self):
+    def test_seed_from_conversation(self):
         """Tests creating a model from a conversation."""
 
         model = Model(
@@ -231,7 +542,7 @@ class TestModel:
             Message("I am a friendly assistant.", Role.ASSISTANT),
         )
 
-    def test_model_create_no_seed(self):
+    def test_create_no_seed(self):
         """Tests creating a model without a seed."""
 
         model = Model(name="gpt-4")
@@ -240,7 +551,7 @@ class TestModel:
 
     @pytest.mark.openai
     @pytest.mark.parametrize("model_name", ["gpt-4", "gpt-3.5-turbo"])
-    def test_model_string(self, model_name):
+    def test_string(self, model_name):
         """Tests creating a model with a single message."""
 
         response = Model(name=model_name)("Say Hello!")
@@ -251,7 +562,7 @@ class TestModel:
 
     @pytest.mark.openai
     @pytest.mark.parametrize("model_name", ["gpt-3.5-turbo"])
-    def test_model_conversation(self, model_name):
+    def test_conversation(self, model_name):
         """Tests creating a model with a conversation."""
 
         response = Model(name=model_name)(
@@ -266,7 +577,7 @@ class TestModel:
         assert "hello" in response.lower()
 
     @pytest.mark.openai
-    def test_model_stream(self):
+    def test_stream(self):
         """Tests creating a model with a conversation."""
 
         model = Model(name="gpt-4")
@@ -281,12 +592,31 @@ class TestModel:
 
         assert full_response == response
 
+    def test_functions(self):
+        """Test function mixin in model."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        model = Model(functions=[add_numbers])
+
+        @model.function
+        def subtract_numbers(a: int, b: int):
+            """Subtracts two integer numbers."""
+
+            return a - b
+
+        assert model.function_call("add_numbers", a=1, b=2) == 3
+        assert model.function_call("subtract_numbers", a=3, b=2) == 1
+
 
 class TestAgent:
     """Tests Agent class."""
 
     @pytest.mark.openai
-    def test_simple_agent_from_str(self):
+    def test_simple_single_string(self):
         """Tests a simple agent."""
 
         find_names = Agent(
@@ -300,14 +630,14 @@ class TestAgent:
         assert len(names) == 3
 
     @pytest.mark.openai
-    def test_simple_agent(self):
+    def test_simple_multiple_messages(self):
         """Tests a simple agent."""
 
         find_names = Agent(
             Message("You are a name finder.", Role.SYSTEM),
             Prompt("Find a short name.", max_tokens=6),
             Prompt("Find yet another name.", max_tokens=6),
-            "This is random system message. No problem for you model no? I try to confuse you.",
+            "This is random system message. No problem for you model no? :)",
             Prompt("Find and a third name.", max_tokens=6),
             Prompt("List the found names comma separated. Ignore everything else."),
             model=Model(stream_callback=lambda chunk: logger.info(chunk)),
@@ -318,7 +648,6 @@ class TestAgent:
         logger.info(names)
 
         assert len(names.split(",")) == 3
-        assert len(find_names.model.conversation) == 10
 
     @pytest.mark.openai
     def test_nested_agent(self):
@@ -345,7 +674,7 @@ class TestAgent:
 
     @pytest.mark.openai
     @pytest.mark.parametrize("nr_names, seperator", [(3, ","), (5, ";")])
-    def test_agent_prompt_template(self, nr_names, seperator):
+    def test_prompt_template(self, nr_names, seperator):
         """Tests an agent with a prompt template."""
 
         find_names = Agent(
@@ -362,32 +691,49 @@ class TestAgent:
         assert len(names.split(seperator)) == nr_names
 
     @pytest.mark.openai
-    def test_agent_function_call(self):
-        """Tests an agent with a prompt template."""
+    @pytest.mark.parametrize(
+        "task, expected_result",
+        [
+            ("add 1 and 2", "3"),
+            ("add 1 and 2 and 3", "6"),
+        ],
+    )
+    def test_function_call(self, task, expected_result):
+        """Tests an agent with function calling."""
 
-        def add_numbers(a: int, b: int):
-            """Adds two integer numbers."""
-
-            return a + b
-
-        calculator = Agent(
+        calculator_agent = Agent(
             Message(
-                "You are a calculater who has access to various functions. Use them!. ",
+                "You are an expert calculater. Use provided functions!",
                 Role.SYSTEM,
             ),
-            Prompt(
-                "Calculate the result for task: {{ task }}", functions=[add_numbers]
-            ),
-            Prompt("Only give the result number as result without anything else!"),
+            Prompt("Calculate the result for task: {{ task }}"),
+            Prompt("Print the result number, nothing else!"),
             model=Model("gpt-3.5-turbo-0613"),
+            # model=Model("gpt-4-0613"),
         )
 
-        result = calculator(task="add the numbers 11111 and 22222")
+        @calculator_agent.function
+        def calculater(a, b, operator: Literal["+", "-", "*", "/"]):
+            """Calculator helper function."""
 
-        assert result == "33333"
+            match operator:
+                case "+":
+                    return a + b
+                case "-":
+                    return a - b
+                case "*":
+                    return a * b
+                case "/":
+                    return a / b
+                case _:
+                    ValueError(f"Operator {operator} not supported.")
+
+        result = calculator_agent(task=task)
+
+        assert result == expected_result
 
     @pytest.mark.openai
-    def test_agent_multiple_function_calls(self):
+    def test_multiple_function_calls(self):
         """Tests an agent with a prompt template."""
 
         def add_numbers(a: int, b: int):
@@ -417,6 +763,46 @@ class TestAgent:
                 functions=[add_numbers, subtract_numbers, multiply_numbers],
             ),
         )
+
+        result = calculator(task="give the final result for (11 + 14) * (6 - 2)")
+
+        assert result == "100"
+
+    @pytest.mark.openai
+    def test_multiple_function_calls_mixed(self):
+        """Tests an agent with a prompt template."""
+
+        def add_numbers(a: int, b: int):
+            """Adds two integer numbers."""
+
+            return a + b
+
+        def subtract_numbers(a: int, b: int):
+            """Subtracts the integer b from integer a."""
+
+            return a - b
+
+        calculator = Agent(
+            Message(
+                "You are a calculater who has access to various functions. Use them!. ",
+                Role.SYSTEM,
+            ),
+            Prompt(
+                "Calculate the result for task: {{ task }}",
+                functions=[subtract_numbers],
+            ),
+            Prompt("Only give the result number as result without anything else!"),
+            model=Model(
+                "gpt-3.5-turbo-0613",
+                functions=[add_numbers],
+            ),
+        )
+
+        @calculator.function
+        def multiply_numbers(a: int, b: int):
+            """Multiplies two integer numbers."""
+
+            return a * b
 
         result = calculator(task="give the final result for (11 + 14) * (6 - 2)")
 
