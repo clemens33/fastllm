@@ -30,16 +30,14 @@ print(cities)
 ```python
 from fastllm import Agent, Message, Model, Prompt, Role
 
-s = ";"
-
 creative_name_finder = Agent(
     Message("You are an expert name finder.", Role.SYSTEM),
     Prompt("Find {{ n }} names.", temperature=2.0),
-    Prompt("Print names {{ s }} separated, nothing else!"),
-    model=Model("gpt-4"),
+    Prompt("Print names comma separated, nothing else!"),
+    model=Model(name="gpt-4"),
 )
 
-names = creative_name_finder(n=3, s=s).split(s)
+names = creative_name_finder(n=3).split(",")
 
 print(names)
 ```
@@ -61,7 +59,6 @@ calculator_agent = Agent(
     Prompt("Calculate the result for task: {{ task }}"),
     Prompt("Only give the result number as result without anything else!"),
 )
-
 
 @calculator_agent.function
 def calculator(a, b, operator: Literal["+", "-", "*", "/"]):
@@ -85,7 +82,7 @@ result = calculator_agent(task="give the final result for (11 + 14) * (6 - 2)")
 print(result)
 
 another_result = calculator_agent(
-    task="if I have 114 apples and 3 children, how many apples will each child get?"
+    task="If I have 114 apples and 3 elephants, how many apples will each elephant get?"
 )
 
 print(another_result)
@@ -109,10 +106,11 @@ print(another_result)
 - [x] Function calling is handled by the Model class itself. Meaning if a LLM response indicate a function call, the Model class will call the function and return the result back to the LLM
 - [ ] Function calling can result in an infinite loop if LLM can not provide function name or arguments properly. This needs to be handled by the Model class.
 - [ ] Prompts with pattern using logit bias to guide LLM completion.
+- [ ] Able to switch between models (e.g. 3.5 and 4) within one agent over different prompts.
 - [ ] Handling of multiple response messages from LLMs in a single call. At the moment only the first response is kept.
 - [ ] Supporting non chat based LLMs (e.g. OpenAI's completion LLMs).
-- [ ] Supporting other LLMs over APIs except OpenAI's. (e.g. google, anthropics, etc.)
-- [ ] Supporting local LLMs (e.g. llama-1, llama-2, mpt, etc.)
+- [ ] Supporting other LLMs over APIs except OpenAI's. (e.g. Google etc.)
+- [ ] Supporting local LLMs (e.g. llama-1, llama-2, etc.)
 
 ### Package
 
@@ -125,7 +123,7 @@ print(another_result)
 - [ ] Better samples using jupyter notebooks
 - [ ] Set up of pre-commit
 - [ ] CI using github actions
-- [ ] Prober release and versioning
+- [ ] Release and versioning
 
 ## Development
 

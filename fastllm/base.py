@@ -129,6 +129,9 @@ class Function:
 
         properties = {param: {} for param in params}
         for name, type_hint in type_hints.items():
+            if name == "return":
+                continue
+
             array = False
             literals = None
 

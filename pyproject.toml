@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "fastllm"
-version = "0.1.1"
+version = "0.1.2"
 description = "Fast and easy wrapper around LLMs."
 authors = ["Clemens Kriechbaumer <clemens.kriechbaumer@gmail.com>"]
 readme = "README.md"
 license = "Apache-2.0"
 homepage = "https://github.com/clemens33/fastllm"
 repository = "https://github.com/clemens33/fastllm"
-keywords = ["agents", "chatbots", "openai", "llm"]
+keywords = ["agents", "chatbots", "openai", "llm", "ai"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 

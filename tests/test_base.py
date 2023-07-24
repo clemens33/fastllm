@@ -41,6 +41,18 @@ class TestFunction:
         }
         assert function(a=3, b=4) == 7
 
+    def test_basic_string(self):
+        """Tests basic functionality."""
+
+        def revert_string(value: str) -> str:
+            """Reverts a string."""
+
+            return value[::-1]
+
+        function = Function(revert_string)
+
+        assert function(value="Hello") == "olleH"
+
     def test_basic_from_function(self):
         """Tests basic functionality."""
 
