@@ -428,20 +428,6 @@ class Conversation:
             else:
                 raise TypeError(f"Cannot add {type(arg)} to Conversation.")
 
-    def count(
-        self, value: str, recent_n: int | None = None, role: Role = Role.ASSISTANT
-    ) -> int:
-        """Counts the appearance of value in the last n messages of given role."""
-
-        messages = [message for message in self.messages if message.role == role]
-        messages = (
-            messages[-recent_n:] if recent_n and recent_n < len(messages) else messages
-        )
-
-        matches = [value in repr(m) for m in messages if m.role == role]
-
-        return sum(matches)
-
     def to_list(self) -> list[dict]:
         """Returns the messages as a list of dicts."""
 

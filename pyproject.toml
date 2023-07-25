@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "fastllm"
-version = "0.1.2"
+version = "0.1.3"
 description = "Fast and easy wrapper around LLMs."
 authors = ["Clemens Kriechbaumer <clemens.kriechbaumer@gmail.com>"]
 readme = "README.md"
@@ -32,6 +32,10 @@ pyright = "^1.1.317"
 pytest = "^7.4.0"
 pytest-cov = "^4.1.0"
 python-dotenv = "^1.0.0"
+
+[tool.poetry.group.samples.dependencies]
+requests = "^2.31.0"
+beautifulsoup4 = "^4.12.2"
 
 [build-system]
 requires = ["poetry-core"]

@@ -4,7 +4,13 @@ Fast and simple wrapper around LLMs. The package aims to be simply, precise and 
 
 **Warning - experimental package and subject to change.** For features and plans see the [roadmap](#roadmap).
 
-## Samples
+## Installation
+
+```bash
+pip install fastllm
+```
+
+## [Samples](./samples)
 
 Require an openai api key in `OPENAI_API_KEY` environment variable or `.env` file.
 
@@ -105,6 +111,8 @@ print(another_result)
 - [x] Function schema is inferred from python function type hints, documentation and name
 - [x] Function calling is handled by the Model class itself. Meaning if a LLM response indicate a function call, the Model class will call the function and return the result back to the LLM
 - [ ] Function calling can result in an infinite loop if LLM can not provide function name or arguments properly. This needs to be handled by the Model class.
+- [ ] Streaming with function calling
+- [ ] Option to "smartly forget" conversation history in case context length is too long.
 - [ ] Prompts with pattern using logit bias to guide LLM completion.
 - [ ] Able to switch between models (e.g. 3.5 and 4) within one agent over different prompts.
 - [ ] Handling of multiple response messages from LLMs in a single call. At the moment only the first response is kept.
