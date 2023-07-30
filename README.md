@@ -86,7 +86,13 @@ def calculator(a, b, operator: Literal["+", "-", "*", "/"]):
 result = calculator_agent(task="give the final result for (11 + 14) * (6 - 2)")
 
 print(result)
+```
 
+```bash
+100
+```
+
+```python
 another_result = calculator_agent(
     task="If I have 114 apples and 3 elephants, how many apples will each elephant get?"
 )
@@ -95,9 +101,54 @@ print(another_result)
 ```
 
 ```bash
-100
 38
 ```
+
+#### Avoid and Prefer
+
+Guide completion by prefer or avoid certain words or phrases. Supports regex patterns. For avoiding/banning words typically it is advised to put a [blank space](https://community.openai.com/t/reproducible-gpt-3-5-turbo-logit-bias-100-not-functioning/88293/8) in front of the word.
+
+```python
+cat = Agent(
+    Prompt("Say Cat!"),
+)
+
+print(cat())
+```
+
+```bash
+Cat!
+```
+
+```python
+not_cat = Agent(
+    Prompt("Say Cat!", avoid=r"[ ]?Cat"),
+)
+
+print(not_cat())
+```
+
+OpenAI is making fun of us (that really happened!) and writes "Cat" with a lower case "c". 
+
+```bash
+Dog! Just kidding, cat!
+```
+
+Ok let's try again.
+
+```python
+seriously_not_a_cat = Agent(
+    Prompt("Say Cat!, PLEEASSEE", avoid=r"[ ]?[Cc][aA][tT]]"),
+)
+```
+
+Well no cat but kudos for the effort.
+
+```bash
+Sure, here you go: "Meow! "
+```
+
+
 
 ## Roadmap
 
@@ -110,10 +161,11 @@ print(another_result)
 - [x] Conversation history. The Model class keeps track of the conversation history.
 - [x] Function schema is inferred from python function type hints, documentation and name
 - [x] Function calling is handled by the Model class itself. Meaning if a LLM response indicate a function call, the Model class will call the function and return the result back to the LLM
+- [x] Streaming with function calling
 - [ ] Function calling can result in an infinite loop if LLM can not provide function name or arguments properly. This needs to be handled by the Model class.
-- [ ] Streaming with function calling
+- [ ] Force particular function call by providing function call argument
 - [ ] Option to "smartly forget" conversation history in case context length is too long.
-- [ ] Prompts with pattern using logit bias to guide LLM completion.
+- [x] Prompts with pattern using logit bias to guide LLM completion.
 - [ ] Able to switch between models (e.g. 3.5 and 4) within one agent over different prompts.
 - [ ] Handling of multiple response messages from LLMs in a single call. At the moment only the first response is kept.
 - [ ] Supporting non chat based LLMs (e.g. OpenAI's completion LLMs).
@@ -124,6 +176,7 @@ print(another_result)
 
 - [x] Basic package structure and functionality
 - [x] Test cases and high test coverage
+- [ ] Mock implementation of OpenAI's API for tests
 - [ ] Tests against multiple python versions
 - [ ] 100% test coverage (at the moment around 90%)
 - [ ] Better documentation including readthedocs site.

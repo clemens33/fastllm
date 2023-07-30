@@ -28,6 +28,8 @@ from jinja2 import Template
 from jsonschema import ValidationError, validate
 from openai.error import RateLimitError, ServiceUnavailableError
 
+from fastllm.utils import get_logit_bias
+
 logger = logging.getLogger(__name__)
 
 
@@ -273,13 +275,32 @@ class Functions:
 
 
 @dataclass
+class FunctionCall:
+    """Represents a function call in a message."""
+
+    name: str
+    arguments: str
+
+    def __add__(self, other: FunctionCall):
+        """Implements the + operator."""
+
+        if isinstance(other, FunctionCall):
+            return FunctionCall(
+                self.name,
+                self.arguments + other.arguments,
+            )
+        else:
+            raise TypeError(f"Cannot add FunctionCall and {type(other)}.")
+
+
+@dataclass
 class Message:
     """Represents a message when interacting with a chat model."""
 
     seed: InitVar[Message | dict | str]
     role: Role = Role.USER
     name: str | None = None
-    function_call: dict[str, str] | None = None
+    function_call: FunctionCall | None = None
     content: str = field(init=False, default="")
 
     def __post_init__(self, seed: Message | dict | str):
@@ -290,6 +311,7 @@ class Message:
         elif isinstance(seed, Message):
             self.content = seed.content
             self.role = seed.role
+            self.function_call = seed.function_call
         elif isinstance(seed, dict):
             _seed = self.from_response(seed)
 
@@ -311,29 +333,29 @@ class Message:
         messages = []
         for choice in response["choices"]:
             if "message" in choice:
-                message = choice["message"]
+                data = choice["message"]
 
-                content = "" if message["content"] is None else message["content"]
-                role = Role(message["role"])
+                content = "" if data["content"] is None else data["content"]
+                role = Role(data["role"])
 
-                if "function_call" in message:
-                    function_call = {
-                        "name": message["function_call"]["name"],
-                        "arguments": message["function_call"]["arguments"],
-                    }
-                    messages.append(Message(content, role, function_call=function_call))
-                else:
-                    messages.append(Message(content, role))
             elif "delta" in choice:
-                content = (
-                    choice["delta"]["content"] if "content" in choice["delta"] else ""
-                )
-                role = (
-                    Role(choice["delta"]["role"])
-                    if "role" in choice["delta"]
-                    else Role.ASSISTANT
-                )
+                data = choice["delta"]
 
+                content = data["content"] if "content" in data else ""
+                content = content or ""
+
+                role = Role(data["role"]) if "role" in data else Role.ASSISTANT
+            else:
+                raise ValueError("Cannot parse response.")
+
+            if "function_call" in data:
+                function_call = data["function_call"]
+
+                name = function_call["name"] if "name" in function_call else ""
+                function_call = FunctionCall(name, function_call["arguments"])
+
+                messages.append(Message(content, role, function_call=function_call))
+            else:
                 messages.append(Message(content, role))
 
         if len(messages) == 0:
@@ -356,7 +378,19 @@ class Message:
 
         if isinstance(other, Message):
             if self.role == other.role:
-                return Message(self.content + other.content, self.role)
+                function_call = None
+                if self.function_call and other.function_call:
+                    function_call = self.function_call + other.function_call
+                elif self.function_call:
+                    function_call = self.function_call
+                elif other.function_call:
+                    function_call = other.function_call
+
+                return Message(
+                    self.content + other.content,
+                    self.role,
+                    function_call=function_call,
+                )
             else:
                 raise ValueError("Cannot add messages with different roles.")
         elif isinstance(other, str):
@@ -376,7 +410,10 @@ class Message:
             message["name"] = self.name
 
         if self.function_call:
-            message["function_call"] = self.function_call
+            message["function_call"] = {
+                "name": self.function_call.name,
+                "arguments": self.function_call.arguments,
+            }
 
         return message
 
@@ -440,12 +477,16 @@ class Prompt(Functions):
 
     template: Template = field(init=False)
     role: Role = field(init=False, default=Role.USER)
+    prefer: list[str] | str | None = None
+    avoid: list[str] | str | None = None
     model_params: dict[str, Any] = field(default_factory=dict)
 
     def __init__(
         self,
         template: str,
         role: Role = Role.USER,
+        prefer: list[str] | str | None = None,
+        avoid: list[str] | str | None = None,
         functions: list[Callable[..., Any]] | None = None,
         **model_params,
     ):
@@ -455,6 +496,8 @@ class Prompt(Functions):
 
         self.template = Template(template)
         self.role = role
+        self.prefer = prefer
+        self.avoid = avoid
         self.model_params = model_params
 
     def __call__(self, **kwargs) -> Message:
@@ -474,7 +517,7 @@ class Model(Functions):
 
     def __post_init__(
         self,
-        available_functions: list[Callable[..., Any]] | None = None,
+        functions: list[Callable[..., Any]] | None = None,
         seed: Conversation | Message | str | None = None,
     ):
         """Initializes the model.
@@ -482,7 +525,7 @@ class Model(Functions):
         Optionally pass a seed as conversation, message or string.
         """
 
-        super().__post_init__(available_functions)
+        super().__post_init__(functions)
 
         if seed is None:
             self.conversation = Conversation()
@@ -499,6 +542,8 @@ class Model(Functions):
         self,
         *args: Conversation | Message | str,
         functions: list[Callable[..., Any]] | list[Function] | None = None,
+        prefer: list[str] | str | None = None,
+        avoid: list[str] | str | None = None,
         stream_callback: Callable[[str], Any] | None = None,
         **kwargs,
     ) -> str:
@@ -514,29 +559,33 @@ class Model(Functions):
 
         stream_callback = stream_callback or self.stream_callback
 
+        response = None
         if stream_callback:
-            response = Message("", Role.ASSISTANT)
-
-            for chunk in self.completion(stream=True, **kwargs):
+            for chunk in self.completion(
+                stream=True, prefer=prefer, avoid=avoid, **kwargs
+            ):
                 chunk = Message(chunk)
                 stream_callback(chunk.content)
 
-                response += chunk
+                response = chunk if response is None else response + chunk
         else:
-            response = next(self.completion(**kwargs))
+            response = next(self.completion(prefer=prefer, avoid=avoid, **kwargs))
+
+        if response is None:
+            raise ValueError("No response from model.")
 
         message = Message(response)
         if message.function_call:
             self.update(message)
 
             function_output = self.function_call(
-                message.function_call["name"],
-                message.function_call["arguments"],
+                message.function_call.name,
+                message.function_call.arguments,
                 functions=_functions,
             )
 
             function_message = Message(
-                str(function_output), Role.FUNCTION, message.function_call["name"]
+                str(function_output), Role.FUNCTION, message.function_call.name
             )
 
             kwargs.pop("functions", None)
@@ -559,12 +608,40 @@ class Model(Functions):
         max_time=60,
         logger=logger,
     )
-    def completion(self, stream: bool = False, **kwargs) -> Generator[dict, None, None]:
+    def completion(
+        self,
+        stream: bool = False,
+        prefer: list[str] | str | None = None,
+        avoid: list[str] | str | None = None,
+        **kwargs,
+    ) -> Generator[dict, None, None]:
         """Calls the model, retries on RateLimitError."""
+
+        name = kwargs.pop("name", self.name)
+        logit_bias = kwargs.get("logit_bias", {})
+
+        if prefer:
+            _logit_bias, _ = get_logit_bias(name, prefer)
+
+            logit_bias.update(_logit_bias)
+        if avoid:
+            _logit_bias, _ = get_logit_bias(name, avoid, bias=-100)
+
+            logit_bias.update(_logit_bias)
+
+        if logit_bias:
+            kwargs["logit_bias"] = logit_bias
+
+            # this is a hard limit by OpenAI for tokens with a logit bias
+            if len(kwargs["logit_bias"]) > 300:
+                raise ValueError(
+                    f'Too many tokens ({len(kwargs["logit_bias"])}) in logit bias \
+for model {name}.'
+                )
 
         if len(self.conversation) > 0:
             response = openai.ChatCompletion.create(
-                model=self.name,
+                model=name,
                 messages=self.conversation.to_list(),
                 stream=stream,
                 **kwargs,
@@ -654,6 +731,8 @@ class Agent(Functions):
                 yield self.model(
                     *steps,
                     prompt(**inputs),
+                    prefer=prompt.prefer,
+                    avoid=prompt.avoid,
                     functions=prompt._functions + self._functions,
                     **prompt.model_params,
                 )

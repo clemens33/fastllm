@@ -1,6 +1,7 @@
 """Tests for the Message class."""
 
 import logging
+import re
 from typing import Any, Callable, List, Literal
 
 import pytest
@@ -10,6 +11,7 @@ from fastllm.base import (
     Agent,
     Conversation,
     Function,
+    FunctionCall,
     Functions,
     Message,
     Model,
@@ -310,6 +312,28 @@ class TestFunctions:
         assert agent.function_call("my_multiplication", a=1, b=0) == 0
 
 
+class TestFunctionCall:
+    """Tests the FunctionCall method."""
+
+    def test_add(self):
+        """Tests basic functionality."""
+
+        fc1 = FunctionCall("add_numbers", arguments="{\n  ")
+        fc2 = FunctionCall("subtract_numbers", arguments='"a": 1234,\n  "b": 9876\n}')
+
+        fc = fc1 + fc2
+        assert fc.name == "add_numbers"
+        assert fc.arguments == '{\n  "a": 1234,\n  "b": 9876\n}'
+
+    def test_add_fails(self):
+        """Tests basic functionality."""
+
+        fc1 = FunctionCall("add_numbers", arguments="{\n  ")
+
+        with pytest.raises(TypeError):
+            fc1 + "abc"  # type: ignore
+
+
 class TestMessage:
     """Tests for Message class."""
 
@@ -371,7 +395,7 @@ class TestMessage:
         assert message.role == Role.ASSISTANT
         assert message.content == ""
         assert message.function_call is not None
-        assert message.function_call["name"] == "add_numbers"
+        assert message.function_call.name == "add_numbers"
 
     def test_str(self):
         """Tests the string representation of a Message."""
@@ -623,6 +647,24 @@ class TestModel:
         assert model.function_call("add_numbers", a=1, b=2) == 3
         assert model.function_call("subtract_numbers", a=3, b=2) == 1
 
+    def test_functions_callback(self):
+        """Test function mixin in model."""
+
+        def stream_callback(chunk):
+            logger.info(chunk)
+
+        model = Model(stream_callback=stream_callback)
+
+        @model.function
+        def subtract_numbers(a: int, b: int):
+            """Subtracts two integer numbers."""
+
+            return a - b
+
+        result = model("subtract 37 from 42")
+
+        assert "5" in result
+
 
 class TestAgent:
     """Tests Agent class."""
@@ -819,3 +861,28 @@ class TestAgent:
         result = calculator(task="give the final result for (11 + 14) * (6 - 2)")
 
         assert result == "100"
+
+    def test_prompt_prefer(self):
+        """Tests usage of pattern prompt."""
+
+        find_number = Agent(
+            Prompt("Give me a random number between 10 and 99", prefer=r"[0-9]{2}"),
+        )
+
+        number = find_number()
+
+        assert re.match(r"[0-9]{2}", number)
+
+    def test_prompt_avoid(self):
+        """Tests usage of pattern prompt."""
+
+        say_hello = Agent(
+            Prompt(
+                "Say Hello!",
+                avoid=[r"([ ]?[Hh](e(l(l(o?)?)?)?)?)?"],
+            ),
+        )
+
+        not_hello = say_hello()
+
+        assert "Hello" not in not_hello
