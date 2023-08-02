@@ -104,9 +104,11 @@ print(another_result)
 38
 ```
 
-#### Avoid and Prefer
+#### Avoid words/phrases 
 
-Guide completion by prefer or avoid certain words or phrases. Supports regex patterns. For avoiding/banning words typically it is advised to put a [blank space](https://community.openai.com/t/reproducible-gpt-3-5-turbo-logit-bias-100-not-functioning/88293/8) in front of the word.
+Avoid/ban word and phrases - supports patterns. Patterns follow regex syntax but do not support all features. If the number of possible strings matching the pattern is too large, the pattern is ignored. 
+
+For avoiding/banning words typically it is advised to put a [blank space](https://community.openai.com/t/reproducible-gpt-3-5-turbo-logit-bias-100-not-functioning/88293/8) in front of the word.
 
 ```python
 cat = Agent(
@@ -120,6 +122,8 @@ print(cat())
 Cat!
 ```
 
+No we avoid/ban the regex pattern `r"[ ]?Cat"` (e.g. " Cat" or "Cat") from the response.
+
 ```python
 not_cat = Agent(
     Prompt("Say Cat!", avoid=r"[ ]?Cat"),
@@ -128,7 +132,7 @@ not_cat = Agent(
 print(not_cat())
 ```
 
-OpenAI is making fun of us (that really happened!) and writes "Cat" with a lower case "c". 
+OpenAI is making fun of us (that really happened!) - obviously we need to be more specific (e.g. ban lowercase and uppercase)
 
 ```bash
 Dog! Just kidding, cat!
@@ -140,6 +144,8 @@ Ok let's try again.
 seriously_not_a_cat = Agent(
     Prompt("Say Cat!, PLEEASSEE", avoid=r"[ ]?[Cc][aA][tT]]"),
 )
+
+print(seriously_not_a_cat())
 ```
 
 Well no cat but kudos for the effort.
@@ -148,7 +154,49 @@ Well no cat but kudos for the effort.
 Sure, here you go: "Meow! "
 ```
 
+#### Prefer words/phrases
 
+Prefer words/phrases - supports patterns. Patterns follow regex syntax but do not support all features. Only supports pattern matching a limited number of strings. The max token length is set to the longest possible string in the pattern. Also the order of token can not be guaranteed. 
+
+```python
+meow = Agent(
+    Prompt("Say Hi!", prefer="Meow!"),
+)
+
+print(meow())
+```
+
+```bash
+Meow!
+```
+
+```python
+austria_wins = Agent(
+    Prompt("Predict the score for Austria against Germany.", prefer=r"Austria: [3-4], Germany: [0-1]"),
+)
+
+print(austria_wins())
+```
+
+Order of tokens is not guaranteed (and this is obviously false ;))
+
+```bash
+Austria, 1: Germany, 3
+```
+
+```python
+meow = Agent(
+    Prompt("Say Hi!", prefer="Meow!", max_tokens=10),
+)
+
+print(meow())
+```
+
+Our model can only say "Meow" or "!" up to 10 tokens.
+
+```bash
+Meow!!!!Meow!Meow!Meow!Meow!Meow
+```
 
 ## Roadmap
 

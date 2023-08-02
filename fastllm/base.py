@@ -621,11 +621,14 @@ class Model(Functions):
         logit_bias = kwargs.get("logit_bias", {})
 
         if prefer:
-            _logit_bias, _ = get_logit_bias(name, prefer)
+            _logit_bias, _, max_tokens = get_logit_bias(name, prefer)
+
+            if "max_tokens" not in kwargs:
+                kwargs["max_tokens"] = max_tokens
 
             logit_bias.update(_logit_bias)
         if avoid:
-            _logit_bias, _ = get_logit_bias(name, avoid, bias=-100)
+            _logit_bias, _, _ = get_logit_bias(name, avoid, bias=-100)
 
             logit_bias.update(_logit_bias)
 

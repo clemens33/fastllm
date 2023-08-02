@@ -9,7 +9,7 @@ import tiktoken
 
 def get_logit_bias(
     model_name: str, pattern: list[str] | str, bias: int = 100, limit: int = 10000
-) -> tuple[dict[str, int], list[str]]:
+) -> tuple[dict[str, int], list[str], int]:
     """Given a model name, a pattern and a bias, returns a logit bias dict."""
 
     tokenizer = tiktoken.encoding_for_model(model_name)
@@ -37,6 +37,11 @@ with {count} strings."
 
         encoded_strings += tokenizer.encode_batch(strings)
 
+    max_tokens = len(max(encoded_strings, key=len))
     tokens = set(chain.from_iterable(encoded_strings))
 
-    return {f"{t}": bias for t in tokens}, [tokenizer.decode([t]) for t in tokens]
+    return (
+        {f"{t}": bias for t in tokens},
+        [tokenizer.decode([t]) for t in tokens],
+        max_tokens,
+    )
