@@ -5,16 +5,15 @@
     "ruff.importStrategy": "fromEnvironment",
     "ruff.enable": true,
     "ruff.fixAll": false,
-    "ruff.run": "onSave",
+    "ruff.lint.run": "onSave",
     "black-formatter.importStrategy": "fromEnvironment",
     "python.testing.pytestEnabled": true,
     "[python]": {
         "editor.formatOnSave": true,
         "editor.codeActionsOnSave": {
-            "source.organizeImports": true,
-            "editor.formatOnSave": true
+            "source.organizeImports": "explicit",
+            "editor.formatOnSave": "explicit"
         },
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
-    "python.formatting.provider": "none"
 }
