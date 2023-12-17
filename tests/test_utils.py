@@ -35,7 +35,7 @@ from fastllm.utils import get_logit_bias
 def test_logit_bias(model_name, patterns, bias, expected_logit_bias, expected_tokens):
     """Test logit_bias function."""
 
-    logit_bias, tokens = get_logit_bias(model_name, patterns, bias)
+    logit_bias, tokens, _ = get_logit_bias(model_name, patterns, bias)
 
     assert logit_bias == expected_logit_bias
     assert tokens == expected_tokens
