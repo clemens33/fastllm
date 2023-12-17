@@ -23,10 +23,10 @@ from typing import (
 )
 
 import backoff
-import openai
 from jinja2 import Template
 from jsonschema import ValidationError, validate
-from openai.error import RateLimitError, ServiceUnavailableError
+from openai import APIConnectionError as ServiceUnavailableError
+from openai import OpenAI, RateLimitError
 
 from fastllm.utils import get_logit_bias
 
@@ -344,11 +344,15 @@ class Message:
                 content = data["content"] if "content" in data else ""
                 content = content or ""
 
-                role = Role(data["role"]) if "role" in data else Role.ASSISTANT
+                role = (
+                    Role(data["role"])
+                    if "role" in data and data["role"]
+                    else Role.ASSISTANT
+                )
             else:
                 raise ValueError("Cannot parse response.")
 
-            if "function_call" in data:
+            if "function_call" in data and data["function_call"]:
                 function_call = data["function_call"]
 
                 name = function_call["name"] if "name" in function_call else ""
@@ -513,6 +517,7 @@ class Model(Functions):
     seed: InitVar[Conversation | Message | str | None] = None
     name: str = "gpt-3.5-turbo-0613"
     stream_callback: Callable[[str], Any] | None = None
+    client: OpenAI = OpenAI()
     conversation: Conversation = field(init=False, default_factory=Conversation)
 
     def __post_init__(
@@ -643,7 +648,7 @@ for model {name}.'
                 )
 
         if len(self.conversation) > 0:
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=name,
                 messages=self.conversation.to_list(),
                 stream=stream,
@@ -654,9 +659,9 @@ for model {name}.'
 
         if stream:
             for chunk in response:
-                yield dict(chunk)
+                yield chunk.model_dump()  # type: ignore
         else:
-            yield response  # type: ignore
+            yield response.model_dump()  # type: ignore
 
     def function_call(
         self,
