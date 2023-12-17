@@ -247,3 +247,10 @@ poetry install
 ```bash
 poetry run pytest
 ``` 
+
+### Publish
+
+```bash
+poetry publish --build
+```
+
