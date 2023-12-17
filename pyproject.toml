@@ -22,16 +22,18 @@ packages = [{ include = "fastllm" }]
 python = "^3.10"
 jinja2 = "^3.1.2"
 backoff = "^2.2.1"
-openai = "^0.27.8"
-jsonschema = "^4.18.4"
-tiktoken = "^0.4.0"
+openai = "^1.5.0"
+jsonschema = "^4.20.0"
+tiktoken = "^0.5.2"
 exrex = "^0.11.0"
+requests = {version = "^2.31.0", extras = ["samples"]}
+beautifulsoup4 = {version = "^4.12.2", extras = ["samples"]}
 
 [tool.poetry.group.dev.dependencies]
-ruff = "^0.0.278"
-black = "^23.7.0"
-pyright = "^1.1.317"
-pytest = "^7.4.0"
+ruff = "^0.1.8"
+black = "^23.12.0"
+pyright = "^1.1.341"
+pytest = "^7.4.3"
 pytest-cov = "^4.1.0"
 python-dotenv = "^1.0.0"
 
