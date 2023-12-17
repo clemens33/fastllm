@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "fastllm"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fast and easy wrapper around LLMs."
 authors = ["Clemens Kriechbaumer <clemens.kriechbaumer@gmail.com>"]
 readme = "README.md"
